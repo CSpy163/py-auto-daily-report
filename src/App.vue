@@ -75,12 +75,19 @@
       <div slot="header">
         <span>你好：「 {{ onlineData.username }} 」</span>
 
-        <span style="float: right">{{ currentDateTime }}</span>
-        <span style="display: block; text-align: center"
-          >《{{
-            onlineData.momented ? onlineData.title : momentedTitle
-          }}》</span
+        <span style="float: right">{{ currentDate }}</span>
+        <div
+          style="display: flex; flex-direction: row; justify-content: center"
         >
+          <span>《{{ renderedTitle }}.xlsx》</span>
+          <el-button
+            type="text"
+            icon="el-icon-edit"
+            @click="titleConfigDialogVisible = true"
+            style="color: grey"
+            size="mini"
+          ></el-button>
+        </div>
       </div>
       <el-row :gutter="20">
         <el-col :span="18">
@@ -170,14 +177,49 @@
           </div>
 
           <el-button style="width: 80%; margin: 10px 10%" type="primary"
-            >保存并下载</el-button
+            >保存</el-button
+          >
+          <el-button
+            style="width: 80%; margin: 0 10%"
+            type="primary"
+            @click="downloadExcel"
+            >下载</el-button
           >
         </el-col>
       </el-row>
     </el-card>
 
-    <!-- 填写日志弹窗 -->
-    <el-dialog title="日志" :visible.sync="logDialogVisible" width="60%" center>
+    <el-dialog
+      title="日报标题配置"
+      :visible.sync="titleConfigDialogVisible"
+      width="40%"
+      center
+    >
+      <el-form label-width="100px" style="padding-right: 80px">
+        <el-form-item label="日报标题">
+          <el-input clearable v-model="onlineData.title"></el-input>
+        </el-form-item>
+        <el-form-item label="格式化">
+          <el-switch
+            v-model="onlineData.momented"
+            active-color="#13ce66"
+            inactive-color="#ff4949"
+            :active-value="true"
+            :inactive-value="false"
+          >
+          </el-switch>
+          <span style="color: grey; float: right"
+            >格式化语法具体参考momonet.js</span
+          >
+        </el-form-item>
+        <el-form-item label="显示效果">
+          <el-input clearable v-model="renderedTitle"></el-input>
+        </el-form-item>
+      </el-form>
+    </el-dialog>
+
+    <!-- 填写日报弹窗 -->
+    <el-dialog title="日报" :visible.sync="logDialogVisible" width="60%" center>
       <el-form
         :model="logDialogForm"
         label-width="100px"
@@ -253,8 +295,15 @@
 <script>
 // 加密框架
 const CryptoJS = require("crypto-js");
+// 日期框架
 const moment = require("moment");
 moment.locale("zh-cn");
+// xlsx-style
+const xlsxStyle = require("xlsx-style");
+// saveAs
+import { saveAs } from "file-saver";
+// 获取 WorkBook 对象
+const getWbObj = require("./utils/report");
 
 // 格式化时间
 function formatDate(date) {
@@ -262,9 +311,18 @@ function formatDate(date) {
   return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
 }
 
+function s2ab(s) {
+  var buf = new ArrayBuffer(s.length);
+  var view = new Uint8Array(buf);
+  for (var i = 0; i != s.length; ++i) view[i] = s.charCodeAt(i) & 0xff;
+  return buf;
+}
+
 export default {
   data() {
     return {
+      titleConfigDialogVisible: false,
+
       types: [
         "文档编写",
         "技术预研",
@@ -276,7 +334,7 @@ export default {
         "微调",
       ],
       states: ["完成", "未完成", "暂停", "即将完成", "遇到问题"],
-      // 日志弹窗时间选择控件
+      // 日报弹窗时间选择控件
       logTimeRange: [],
       bigProblem: "",
       nextDayWork: "",
@@ -296,19 +354,6 @@ export default {
         username: "",
         title: "",
         momented: false,
-        // 当前
-        // plans: [
-        //   {
-        //     beginDate: "",
-        //     endDate: "",
-        //     name: "",
-        //     mainWork: "",
-        //     type: "",
-        //     state: "",
-        //     problem: "",
-        //     solution: "",
-        //   },
-        // ],
         // 往期日报
         oldReports: [
           {
@@ -332,6 +377,8 @@ export default {
       },
       // 本地是否有数据，决定显示登录页还是注册页
       hasData: false,
+      // plans 正在编辑的下标
+      editing: -1,
       // 注册表单
       registerForm: {
         username: "",
@@ -347,24 +394,25 @@ export default {
     };
   },
   computed: {
-    // moment.js 处理过的 title
-    momentedTitle() {
-      let tmpTitle = this.onlineData.title.replace(
+    // 渲染之后的标题
+    renderedTitle() {
+      let tmpTitle = this.onlineData.title.replaceAll(
         "${user}",
         this.onlineData.username
       );
-      return moment().format(tmpTitle ? tmpTitle : "ll");
+      if (this.onlineData.momented) {
+        // moment.js 处理过的 title
+        return moment().format(tmpTitle);
+      } else {
+        return tmpTitle;
+      }
     },
-    // 返回当前年月日
-    currentDateTime() {
-      let date = new Date();
-      return `${date.getFullYear()}年${
-        date.getMonth() + 1
-      }月${date.getDate()}日`;
+    currentDate() {
+      return moment().format("ll");
     },
   },
   watch: {
-    // 监听日志选择时间范围
+    // 监听日报选择时间范围
     logTimeRange(newVal) {
       if (newVal) {
         this.logDialogForm.beginDate = newVal[0];
@@ -376,17 +424,54 @@ export default {
     },
   },
   methods: {
-    // 删除日志
+    // 下载当前填写的日报
+    downloadExcel() {
+      // let wopts = { bookType: "xlsx", bookSST: false, type: "array" };
+      let wopts = { bookType: "xlsx", bookSST: false, type: "binary" };
+      let wbObj = getWbObj(
+        this.onlineData.username,
+        moment().format("ll"),
+        this.tableData,
+        this.bigProblem,
+        this.nextDayWork
+      );
+      let wb = {
+        SheetNames: ["工作日志"],
+        Sheets: { 工作日志: wbObj },
+      };
+      let wbout = xlsxStyle.write(
+        wb,
+        wopts
+      );
+
+      /* the saveAs call downloads a file on the local machine */
+      saveAs(
+        new Blob([s2ab(wbout)], { type: "" }),
+        `${this.renderedTitle ? this.renderedTitle : "工作日志"}.xlsx`
+      );
+      // xlsxStyle.writeFile(wb, `${this.renderedTitle?this.renderedTitle:'工作日志'}.xlsx`);
+
+      // saveAs(
+      //   new Blob([wbout], { type: "application/octet-stream" }),
+      //   `${this.renderedTitle?this.renderedTitle:'工作日志'}.xlsx`
+      // );
+    },
+    // 删除日报
     deleteLog(index) {
       this.tableData.splice(index, 1);
     },
     // 编辑
     editLog(scope) {
       this.showLogDialog("", scope.row);
-      this.tableData.splice(scope.index, 1)
+      this.editing = scope.$index;
     },
-    // 保存日志到表格
+    // 保存日报到表格
     saveLogToTable() {
+      // 如果是正在编辑，则删除原有数据
+      if (this.editing >= 0) {
+        this.tableData.splice(this.editing, 1);
+        this.editing = -1;
+      }
       this.tableData.push({
         name: this.logDialogForm.name,
         mainWork: this.logDialogForm.mainWork,
@@ -397,10 +482,11 @@ export default {
         beginDate: formatDate(this.logDialogForm.beginDate),
         endDate: formatDate(this.logDialogForm.endDate),
       });
+
       this.logDialogVisible = false;
       this.clearLogForm();
     },
-    // 清空日志表单
+    // 清空日报表单
     clearLogForm() {
       this.logTimeRange = "";
       this.logDialogForm.name = "";
@@ -410,7 +496,7 @@ export default {
       this.logDialogForm.problem = "";
       this.logDialogForm.solution = "";
     },
-    // 弹出日志框
+    // 弹出日报框
     showLogDialog(event, row) {
       if (row) {
         this.logTimeRange = [new Date(row.beginDate), new Date(row.endDate)];
