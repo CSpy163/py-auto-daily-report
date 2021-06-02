@@ -364,7 +364,7 @@
           >
           </el-switch>
           <span style="color: grey; float: right"
-            >格式化语法具体参考momonet.js</span
+            >格式化语法具体参考moment.js</span
           >
         </el-form-item>
         <el-form-item label="显示效果">
