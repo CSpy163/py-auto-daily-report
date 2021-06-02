@@ -171,12 +171,20 @@
           <div style="display: flex; margin-top: 10px">
             <el-button-group style="margin: auto">
               <el-button @click="showLogDialog" type="primary">添加</el-button>
-              <el-button type="primary">待办</el-button>
-              <el-button type="primary">往期</el-button>
+              <el-button type="primary" @click="refreshTodo">待办</el-button>
+              <el-button
+                type="primary"
+                :disabled="onlineData.oldReports.length == 0"
+                @click="setHistoryData(0)"
+                >往期</el-button
+              >
             </el-button-group>
           </div>
 
-          <el-button style="width: 80%; margin: 10px 10%" type="primary"
+          <el-button
+            style="width: 80%; margin: 10px 10%"
+            type="primary"
+            @click="saveReportToOld"
             >保存</el-button
           >
           <el-button
@@ -189,6 +197,153 @@
       </el-row>
     </el-card>
 
+    <!-- 待办列表 -->
+    <el-dialog
+      title="待办列表"
+      :visible.sync="todoDialogVisible"
+      width="80%"
+      center
+    >
+      <el-table :data="todoList" style="width: 100%">
+        <el-table-column
+          fixed
+          type="index"
+          label="序号"
+          width="40"
+        ></el-table-column>
+        <el-table-column
+          prop="name"
+          label="项目名称"
+          width="200"
+        ></el-table-column>
+        <el-table-column
+          prop="beginDate"
+          label="起始日期"
+          width="100"
+        ></el-table-column>
+        <el-table-column
+          prop="endDate"
+          label="终止日期"
+          width="100"
+        ></el-table-column>
+        <el-table-column
+          prop="mainWork"
+          label="主要工作内容"
+          width="200"
+        ></el-table-column>
+        <el-table-column
+          prop="type"
+          label="工作性质"
+          width="100"
+        ></el-table-column>
+        <el-table-column
+          prop="state"
+          label="任务完成情况"
+          width="120"
+        ></el-table-column>
+        <el-table-column
+          prop="problem"
+          label="问题点"
+          width="200"
+        ></el-table-column>
+        <el-table-column
+          prop="solution"
+          label="预想对策"
+          width="200"
+        ></el-table-column>
+
+        <el-table-column fixed="right" label="操作" width="100">
+          <template slot-scope="scope">
+            <el-button @click="todoInEdit(scope.row)" type="text" size="small"
+              >编辑</el-button
+            >
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
+
+    <!-- 往期查看 -->
+    <el-dialog
+      title="往期查看"
+      :visible.sync="historyDialogVisible"
+      width="80%"
+      center
+    >
+      <el-table :data="historyTableData" style="width: 100%">
+        <el-table-column
+          fixed
+          type="index"
+          label="序号"
+          width="40"
+        ></el-table-column>
+        <el-table-column
+          prop="name"
+          label="项目名称"
+          width="200"
+        ></el-table-column>
+        <el-table-column
+          prop="beginDate"
+          label="起始日期"
+          width="100"
+        ></el-table-column>
+        <el-table-column
+          prop="endDate"
+          label="终止日期"
+          width="100"
+        ></el-table-column>
+        <el-table-column
+          prop="mainWork"
+          label="主要工作内容"
+          width="200"
+        ></el-table-column>
+        <el-table-column
+          prop="type"
+          label="工作性质"
+          width="100"
+        ></el-table-column>
+        <el-table-column
+          prop="state"
+          label="任务完成情况"
+          width="120"
+        ></el-table-column>
+        <el-table-column
+          prop="problem"
+          label="问题点"
+          width="200"
+        ></el-table-column>
+        <el-table-column
+          prop="solution"
+          label="预想对策"
+          width="200"
+        ></el-table-column>
+      </el-table>
+      <el-input
+        type="textarea"
+        v-model="historyData.bigProblem"
+        disabled
+      ></el-input>
+      <el-input
+        type="textarea"
+        v-model="historyData.nextDayWork"
+        disabled
+      ></el-input>
+      <div slot="footer" style="display: flex">
+        <el-button-group>
+          <el-button
+            type="primary"
+            :disabled="historyIndex <= 0"
+            icon="el-icon-arrow-left"
+            @click="setHistoryData(-1)"
+            >上一个</el-button
+          >
+          <el-button type="primary" :disabled="atEnd" @click="setHistoryData(1)"
+            >下一个<i class="el-icon-arrow-right el-icon--right"></i
+          ></el-button>
+        </el-button-group>
+      </div>
+    </el-dialog>
+
+    <!-- Excel 标题配置 -->
     <el-dialog
       title="日报标题配置"
       :visible.sync="titleConfigDialogVisible"
@@ -311,6 +466,7 @@ function formatDate(date) {
   return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
 }
 
+// 转 bit array
 function s2ab(s) {
   var buf = new ArrayBuffer(s.length);
   var view = new Uint8Array(buf);
@@ -321,8 +477,22 @@ function s2ab(s) {
 export default {
   data() {
     return {
+      // 待办列表
+      todoDialogVisible: false,
+      todoList: [],
+      // 历史弹窗
+      historyDialogVisible: false,
+      historyTableData: [],
+      historyData: {
+        plans: [],
+        createDate: "",
+        bigProblem: "",
+        nextDayWork: "",
+      },
+      historyIndex: 0,
+      // 配置导出文件名弹窗
       titleConfigDialogVisible: false,
-
+      // 任务类型
       types: [
         "文档编写",
         "技术预研",
@@ -333,11 +503,15 @@ export default {
         "重构",
         "微调",
       ],
+      // 任务完成状态
       states: ["完成", "未完成", "暂停", "即将完成", "遇到问题"],
       // 日报弹窗时间选择控件
       logTimeRange: [],
+      // 重大问题
       bigProblem: "",
+      // 下个工作日工作
       nextDayWork: "",
+      // 记录日志弹窗
       logDialogVisible: false,
       logDialogForm: {
         beginDate: "",
@@ -353,26 +527,27 @@ export default {
       onlineData: {
         username: "",
         title: "",
+        // 是否使用 moment 渲染
         momented: false,
         // 往期日报
         oldReports: [
-          {
-            plans: [
-              {
-                beginDate: "",
-                endDate: "",
-                name: "",
-                mainWork: "",
-                type: "",
-                state: "",
-                problem: "",
-                solution: "",
-              },
-            ],
-            bigProblem: "",
-            nextDayWork: "",
-            creatTime: "",
-          },
+          // {
+          //   plans: [
+          //     {
+          //       beginDate: "",
+          //       endDate: "",
+          //       name: "",
+          //       mainWork: "",
+          //       type: "",
+          //       state: "",
+          //       problem: "",
+          //       solution: "",
+          //     },
+          //   ],
+          //   bigProblem: "",
+          //   nextDayWork: "",
+          //   creatTime: "",
+          // },
         ],
       },
       // 本地是否有数据，决定显示登录页还是注册页
@@ -410,6 +585,12 @@ export default {
     currentDate() {
       return moment().format("ll");
     },
+    atEnd() {
+      if (this.onlineData.oldReports) {
+        return this.historyIndex >= this.onlineData.oldReports.length - 1;
+      }
+      return true;
+    },
   },
   watch: {
     // 监听日报选择时间范围
@@ -424,9 +605,78 @@ export default {
     },
   },
   methods: {
+    // todo 转 编辑
+    todoInEdit(row) {
+      this.todoDialogVisible = false;
+      setTimeout(() => {
+        this.editLog({row});
+      }, 200);
+    },
+    // 刷新待办
+    refreshTodo() {
+      this.todoList.splice(0);
+      this.onlineData.oldReports.forEach((oldReport) => {
+        oldReport.plans.forEach((plan) => {
+          if (plan.beginDate || plan.endDate) {
+            if (
+              (!plan.endDate && moment().isSameOrAfter(plan.beginDate)) ||
+              (moment().isSameOrAfter(plan.beginDate) &&
+                moment().isSameOrBefore(plan.endDate)) ||
+              (!plan.beginDate && moment().isSameOrBefore(plan.endDate))
+            ) {
+              this.todoList.push(plan);
+            }
+          }
+        });
+      });
+      this.todoDialogVisible = true;
+    },
+    // 展示历史数据面板
+    setHistoryData(index) {
+      this.historyIndex += index;
+      if (this.historyIndex < 0) this.historyIndex = 0;
+      if (this.historyIndex > this.onlineData.oldReports.length - 1)
+        this.historyIndex = this.onlineData.oldReports.length - 1;
+      let report = this.onlineData.oldReports[this.historyIndex];
+      this.historyTableData.splice(0);
+      this.historyTableData.push(...report.plans);
+      this.historyData.bigProblem = report.bigProblem;
+      this.historyData.nextDayWork = report.nextDayWork;
+      this.historyDialogVisible = true;
+    },
+    // 保存到 localStorage
+    saveToLocalData() {
+      let localData = {
+        username: this.onlineData.username,
+        title: this.onlineData.title,
+        momented: this.onlineData.momented,
+        oldReports: this.onlineData.oldReports,
+      };
+      // 加密保存
+      let localDataAES = CryptoJS.AES.encrypt(
+        JSON.stringify(localData),
+        this.loginForm.password
+      ).toString();
+      localStorage.setItem("localData", localDataAES);
+      this.$message({
+        message: "消息保存至缓存成功。",
+        type: "success",
+      });
+    },
+    // 保存当前数据到历史记录
+    saveReportToOld() {
+      let report = {
+        plans: [...this.tableData],
+        bigProblem: this.bigProblem,
+        nextDayWork: this.nextDayWork,
+        creatTime: new Date(),
+      };
+      this.onlineData.oldReports.push(report);
+      // this.historyData.push(report)
+      this.saveToLocalData();
+    },
     // 下载当前填写的日报
     downloadExcel() {
-      // let wopts = { bookType: "xlsx", bookSST: false, type: "array" };
       let wopts = { bookType: "xlsx", bookSST: false, type: "binary" };
       let wbObj = getWbObj(
         this.onlineData.username,
@@ -439,22 +689,13 @@ export default {
         SheetNames: ["工作日志"],
         Sheets: { 工作日志: wbObj },
       };
-      let wbout = xlsxStyle.write(
-        wb,
-        wopts
-      );
+      let wbout = xlsxStyle.write(wb, wopts);
 
       /* the saveAs call downloads a file on the local machine */
       saveAs(
         new Blob([s2ab(wbout)], { type: "" }),
         `${this.renderedTitle ? this.renderedTitle : "工作日志"}.xlsx`
       );
-      // xlsxStyle.writeFile(wb, `${this.renderedTitle?this.renderedTitle:'工作日志'}.xlsx`);
-
-      // saveAs(
-      //   new Blob([wbout], { type: "application/octet-stream" }),
-      //   `${this.renderedTitle?this.renderedTitle:'工作日志'}.xlsx`
-      // );
     },
     // 删除日报
     deleteLog(index) {
@@ -521,6 +762,9 @@ export default {
 
         // 开始展示功能
         this.onlineData.username = localData.username;
+        this.onlineData.title = localData.title;
+        this.onlineData.momented = localData.momented;
+        this.onlineData.oldReports = localData.oldReports;
       } catch (err) {
         this.$message.error("发生错误，请刷新界面重试！");
       }
@@ -530,13 +774,12 @@ export default {
       // 设置初始化数据
       let localData = {
         username: this.registerForm.username,
-        titleRegex: "",
-        plans: [],
+        title: "",
+        momented: false,
         oldReports: [],
       };
       // 设置需要用到的数据
       this.onlineData.username = this.registerForm.username;
-      // this.onlineData.plans.splice(0);
       this.loginForm.password = this.registerForm.password;
 
       // 加密保存
