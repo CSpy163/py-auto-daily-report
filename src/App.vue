@@ -1,5 +1,19 @@
 <template>
   <div id="app">
+    <el-tooltip
+      class="item"
+      effect="dark"
+      content="查看源码"
+      placement="bottom"
+    >
+      <el-button
+        style="position: absolute; right: 20px; top: 20px"
+        type="info"
+        icon="el-icon-help"
+        @click="jumpToGitlab"
+        circle
+      ></el-button>
+    </el-tooltip>
     <el-card v-show="onlineData.username == ''" class="hello-panel">
       <div slot="header">
         {{ hasData ? "你好，欢迎回来！" : "注册" }}
@@ -571,8 +585,8 @@ export default {
   computed: {
     // 渲染之后的标题
     renderedTitle() {
-      let tmpTitle = this.onlineData.title.replaceAll(
-        "${user}",
+      let tmpTitle = this.onlineData.title.replace(
+        /\${user}/g,
         this.onlineData.username
       );
       if (this.onlineData.momented) {
@@ -605,11 +619,14 @@ export default {
     },
   },
   methods: {
+    jumpToGitlab() {
+      window.open("https://git.cspy.online/cspy/py-auto-daily-report");
+    },
     // todo 转 编辑
     todoInEdit(row) {
       this.todoDialogVisible = false;
       setTimeout(() => {
-        this.editLog({row});
+        this.editLog({ row });
       }, 200);
     },
     // 刷新待办
